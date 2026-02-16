@@ -1,0 +1,22 @@
+# 智能命令行助手 - Git 忽略规则
+
+# Python 虚拟环境
+llm_lab/
+
+# 模型文件（太大不适合提交到 git）
+models/*.gguf
+
+# llama.cpp 编译产物
+llama.cpp/build/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 对话历史
+chat_history.json
+
+# 临时文件
+*.log
+*.tmp
