@@ -35,6 +35,9 @@ class LLMWrapper:
     - 支持对话历史管理和系统提示词设置
     """
 
+    # 对话历史最大保留轮数（超过时自动裁剪最早的消息）
+    MAX_HISTORY_ROUNDS = 6
+
     def __init__(self, model_path: str, server_path: str = None,
                  host: str = "127.0.0.1", port: int = 8080,
                  n_ctx: int = 2048, n_gpu_layers: int = 0):
@@ -187,6 +190,17 @@ class LLMWrapper:
 
         return False
 
+    def _trim_history(self):
+        """
+        裁剪对话历史，防止超出模型上下文窗口。
+        保留最近的 MAX_HISTORY_ROUNDS 轮对话（每轮 = 1条用户 + 1条助手）。
+        """
+        max_messages = self.MAX_HISTORY_ROUNDS * 2
+        if len(self.conversation_history) > max_messages:
+            removed = len(self.conversation_history) - max_messages
+            self.conversation_history = self.conversation_history[-max_messages:]
+            logger.info(f"对话历史过长，已自动裁剪 {removed} 条早期消息")
+
     def send_prompt(self, user_input: str, stream: bool = True) -> str:
         """
         向 LLM 发送提示词并获取回复。
@@ -207,6 +221,9 @@ class LLMWrapper:
             "content": user_input
         })
 
+        # 自动裁剪过长的对话历史
+        self._trim_history()
+
         # 构造请求数据（OpenAI 兼容格式）
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.conversation_history)
@@ -225,6 +242,29 @@ class LLMWrapper:
                 return self._stream_response(url, payload)
             else:
                 return self._batch_response(url, payload)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 400:
+                # 400 错误通常是上下文过长，清空历史后重试
+                logger.warning("收到 400 错误（可能上下文过长），正在清理历史后重试...")
+                # 只保留当前这条用户消息
+                current_msg = self.conversation_history[-1]
+                self.conversation_history.clear()
+                self.conversation_history.append(current_msg)
+                # 重新构造请求
+                messages = [{"role": "system", "content": self.system_prompt}]
+                messages.extend(self.conversation_history)
+                payload["messages"] = messages
+                try:
+                    if stream:
+                        return self._stream_response(url, payload)
+                    else:
+                        return self._batch_response(url, payload)
+                except Exception as e2:
+                    logger.error(f"重试仍失败: {e2}")
+                    return f"❌ 错误：重试仍失败 - {e2}"
+            else:
+                logger.error(f"HTTP 错误: {e}")
+                return f"❌ 错误：{e}"
         except requests.ConnectionError:
             logger.error("连接失败：服务器可能已崩溃")
             self.is_running = False

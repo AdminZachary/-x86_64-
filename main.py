@@ -58,7 +58,11 @@ def execute_system_command(cmd: str) -> str:
         output = result.stdout
         if result.stderr:
             output += "\n[标准错误输出]:\n" + result.stderr
-        return output.strip() if output.strip() else "(命令无输出)"
+        output = output.strip() if output.strip() else "(命令无输出)"
+        # 限制输出长度，防止超出 LLM 上下文窗口
+        if len(output) > 2000:
+            output = output[:2000] + "\n\n... (输出过长，已截断)"
+        return output
     except subprocess.TimeoutExpired:
         return "❌ 命令执行超时（超过 30 秒）"
     except Exception as e:
